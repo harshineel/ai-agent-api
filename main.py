@@ -2,8 +2,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import logging
 import re
+import logging
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -22,10 +22,29 @@ client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 class SolveRequest(BaseModel):
     query: str = Field(..., description="The question to answer")
-    assets: Optional[List[str]] = Field(default=[])
+    assets: Optional[List[str]] = Field(default=[], description="Asset URLs")
 
 class SolveResponse(BaseModel):
     output: str
+
+def detect_math(query: str):
+    q = query.lower()
+    numbers = re.findall(r'\d+\.?\d*', query)
+    if len(numbers) >= 2:
+        a, b = float(numbers[0]), float(numbers[1])
+        if any(w in q for w in ['sum', 'add', 'plus', '+']):
+            result = int(a + b) if (a + b).is_integer() else a + b
+            return f"The sum is {result}."
+        if any(w in q for w in ['subtract', 'minus', 'difference', '-']):
+            result = int(a - b) if (a - b).is_integer() else a - b
+            return f"The difference is {result}."
+        if any(w in q for w in ['multiply', 'product', 'times', '*', 'x']):
+            result = int(a * b) if (a * b).is_integer() else a * b
+            return f"The product is {result}."
+        if any(w in q for w in ['divide', 'quotient', '/']):
+            result = int(a / b) if (a / b).is_integer() else round(a / b, 2)
+            return f"The quotient is {result}."
+    return None
 
 @app.get("/")
 async def health_check():
@@ -34,96 +53,33 @@ async def health_check():
 @app.post("/solve", response_model=SolveResponse)
 async def solve_problem(request: SolveRequest):
 
-    query = request.query.lower()
-
-    # 🔥 RULE-BASED SOLUTIONS (BOOST ACCURACY)
-
-    # Addition
-    match = re.search(r'(\d+)\s*\+\s*(\d+)', query)
-    if match:
-        return SolveResponse(output=f"The sum is {int(match.group(1)) + int(match.group(2))}.")
-
-    # Subtraction
-    match = re.search(r'(\d+)\s*-\s*(\d+)', query)
-    if match:
-        return SolveResponse(output=f"The difference is {int(match.group(1)) - int(match.group(2))}.")
-
-    # Multiplication
-    match = re.search(r'(\d+)\s*\*\s*(\d+)', query)
-    if match:
-        return SolveResponse(output=f"The product is {int(match.group(1)) * int(match.group(2))}.")
-
-    # Division
-    match = re.search(r'(\d+)\s*/\s*(\d+)', query)
-    if match:
-        b = int(match.group(2))
-        if b != 0:
-            return SolveResponse(output=f"The quotient is {int(match.group(1)) // b}.")
-
-    # Factorial
-    match = re.search(r'factorial of (\d+)', query)
-    if match:
-        n = int(match.group(1))
-        fact = 1
-        for i in range(1, n+1):
-            fact *= i
-        return SolveResponse(output=f"The factorial is {fact}.")
-
     try:
-        # 🤖 LLM fallback for complex queries
-        system_prompt = """You are a highly intelligent, direct, and factual AI. Provide ONLY the exact answer without any conversational filler, intro, or formatting.
+        # Try direct math detection first
+        math_result = detect_math(request.query)
+        if math_result:
+            return SolveResponse(output=math_result)
 
-IMPORTANT FORMATTING RULES:
-For simple math, ALWAYS use these exact formats (ending with a period):
-- Addition: The sum is X.
-- Subtraction: The difference is X.
-- Multiplication: The product is X.
-- Division: The quotient is X.
-- Factorial: The factorial is X.
+        # Fall back to LLM for non-math questions
+        response = await client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """Answer every question in exactly one short sentence ending with a period.
+Be direct and concise. No extra explanation or formatting."""
+                },
+                {
+                    "role": "user",
+                    "content": request.query
+                }
+            ],
+            temperature=0,
+            max_tokens=100
+        )
 
-For non-math questions: Do NOT add a period at the end unless it is grammatically required for a full sentence or explicitly requested. Be as concise as humanly possible."""
-
-        messages = [
-            {"role": "system", "content": system_prompt}
-        ]
-
-        if request.assets and len(request.assets) > 0:
-            model = "llama-3.2-90b-vision-preview"
-            user_content = [{"type": "text", "text": request.query}]
-            for url in request.assets:
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": url}
-                })
-            messages.append({"role": "user", "content": user_content})
-        else:
-            model = "llama-3.3-70b-versatile"
-            messages.append({"role": "user", "content": request.query})
-
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-                max_tokens=500
-            )
-        except Exception as api_err:
-            if model == "llama-3.2-90b-vision-preview":
-                logger.warning(f"Vision model failed, falling back to text-only: {api_err}")
-                messages[-1]["content"] = request.query
-                response = await client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=messages,
-                    temperature=0,
-                    max_tokens=500
-                )
-            else:
-                raise api_err
-
-        content = response.choices[0].message.content.strip()
-
+        content = response.choices[0].message.content or "Could not process accurately"
         return SolveResponse(output=content)
 
     except Exception as e:
-        logger.error(f"Error: {e}")
-        return SolveResponse(output="Could not process accurately.")
+        logger.error(f"Error processing request: {type(e).__name__}: {e}")
+        return SolveResponse(output="Could not process accurately")
