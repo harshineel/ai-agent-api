@@ -71,41 +71,56 @@ async def solve_problem(request: SolveRequest):
 
     try:
         # 🤖 LLM fallback for complex queries
-        response = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You answer every question in exactly one short sentence ending with a period.
+        system_prompt = """You are a highly intelligent, direct, and factual AI. Provide ONLY the exact answer without any conversational filler, intro, or formatting.
 
-For math:
+IMPORTANT FORMATTING RULES:
+For simple math, ALWAYS use these exact formats (ending with a period):
 - Addition: The sum is X.
 - Subtraction: The difference is X.
 - Multiplication: The product is X.
 - Division: The quotient is X.
 - Factorial: The factorial is X.
 
-Rules:
-- ALWAYS end with a period.
-- NO extra words.
-- NO explanation.
-- Keep it extremely concise.
-"""
-                },
-                {
-                    "role": "user",
-                    "content": request.query
-                }
-            ],
-            temperature=0,
-            max_tokens=50
-        )
+For non-math questions: Do NOT add a period at the end unless it is grammatically required for a full sentence or explicitly requested. Be as concise as humanly possible."""
+
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
+
+        if request.assets and len(request.assets) > 0:
+            model = "llama-3.2-90b-vision-preview"
+            user_content = [{"type": "text", "text": request.query}]
+            for url in request.assets:
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": url}
+                })
+            messages.append({"role": "user", "content": user_content})
+        else:
+            model = "llama-3.3-70b-versatile"
+            messages.append({"role": "user", "content": request.query})
+
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0,
+                max_tokens=500
+            )
+        except Exception as api_err:
+            if model == "llama-3.2-90b-vision-preview":
+                logger.warning(f"Vision model failed, falling back to text-only: {api_err}")
+                messages[-1]["content"] = request.query
+                response = await client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    temperature=0,
+                    max_tokens=500
+                )
+            else:
+                raise api_err
 
         content = response.choices[0].message.content.strip()
-
-        # 🔒 FINAL SAFETY: ensure period
-        if not content.endswith("."):
-            content += "."
 
         return SolveResponse(output=content)
 
