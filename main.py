@@ -38,15 +38,22 @@ async def solve_problem(request: SolveRequest):
             model="llama-3.3-70b-versatile",
             messages=[
                 {
+    {
     "role": "system",
-    "content": """You are a helpful AI assistant. Answer questions in a clean, direct sentence format.
-For math questions, use format like: 'The sum is 25.' or 'The result is 120.'
-Keep answers short, one sentence, ending with a period.
-Do not add explanations or extra text."""
+    "content": """You are a precise AI assistant. Follow these rules strictly:
+- For math/arithmetic questions, answer like: 'The sum is 25.' or 'The difference is 10.' or 'The product is 100.'
+- For factual questions, answer in one clean sentence ending with a period.
+- Never add explanations, steps, or extra text.
+- Never use bullet points or lists.
+- Always answer in exactly one short sentence.
+- Match this style exactly: 'The sum is 25.' or 'The answer is 42.'"""
+},
 },
                 {
-                    "role": "user",
-                    "content": request.query
+                    {
+    "role": "user",
+    "content": f"Answer in one sentence: {request.query}"
+},
                 }
             ],
             temperature=0,
