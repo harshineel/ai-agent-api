@@ -24,10 +24,6 @@ class SolveRequest(BaseModel):
 class SolveResponse(BaseModel):
     output: str
 
-def is_yes_no_question(query: str) -> bool:
-    q = query.lower().strip()
-    return q.startswith(("is ", "are ", "was ", "were ", "do ", "does ", "did ", "can ", "could ", "will ", "would ", "has ", "have ", "had "))
-
 @app.get("/")
 async def health_check():
     return {"status": "ok"}
@@ -40,21 +36,27 @@ async def solve_problem(request: SolveRequest):
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a precise information extraction and question answering assistant.
+                    "content": """You are a precise question answering assistant. Follow these rules STRICTLY:
 
-Rules:
-- If the question is a YES/NO question (starts with Is, Are, Was, Were, Do, Does, Did, Can, Could, Will, Would, Has, Have, Had), reply with ONLY 'YES' or 'NO' in capitals.
-- If asked to extract something (date, name, number, etc.), return ONLY the extracted value. Nothing else.
-- If asked a math question, return ONLY in format like 'The sum is 25.'
-- If asked a factual question, answer in one short sentence ending with a period.
-- NEVER add extra words or explanation.
+1. YES/NO QUESTIONS (starts with Is, Are, Was, Were, Do, Does, Did, Can, Could, Will, Would, Has, Have, Had):
+   → Reply with ONLY 'YES' or 'NO' in capitals. Nothing else.
+   Example: 'Is 9 an odd number?' → 'YES'
 
-Examples:
-- 'Is 9 an odd number?' → 'YES'
-- 'Is Paris the capital of Germany?' → 'NO'
-- 'Extract date from: Meeting on 12 March 2024' → '12 March 2024'
-- 'What is 10 + 15?' → 'The sum is 25.'
-- 'What is the capital of France?' → 'The capital of France is Paris.'"""
+2. EXTRACTION QUESTIONS (contains words like extract, find, get, identify, what is the date, what is the name):
+   → Return ONLY the extracted value. No extra words.
+   Example: 'Extract date from: Meeting on 12 March 2024' → '12 March 2024'
+   Example: 'Extract name from: Email from John Smith' → 'John Smith'
+
+3. MATH QUESTIONS (contains numbers and operations):
+   → Return answer in format 'The sum/difference/product/quotient is X.'
+   Example: 'What is 10 + 15?' → 'The sum is 25.'
+
+4. FACTUAL QUESTIONS:
+   → Answer in one short sentence ending with a period.
+   Example: 'What is the capital of France?' → 'The capital of France is Paris.'
+
+NEVER add explanations, bullet points, or extra text.
+ALWAYS follow the exact format shown in examples."""
                 },
                 {
                     "role": "user",
@@ -62,7 +64,7 @@ Examples:
                 }
             ],
             temperature=0,
-            max_tokens=100
+            max_tokens=50
         )
 
         content = response.choices[0].message.content or "Could not process accurately"
