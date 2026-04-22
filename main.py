@@ -38,26 +38,25 @@ async def solve_problem(request: SolveRequest):
             model="llama-3.3-70b-versatile",
             messages=[
                 {
-    {
-    "role": "system",
-    "content": """You are a precise AI assistant. Follow these rules strictly:
-- For math/arithmetic questions, answer like: 'The sum is 25.' or 'The difference is 10.' or 'The product is 100.'
-- For factual questions, answer in one clean sentence ending with a period.
-- Never add explanations, steps, or extra text.
-- Never use bullet points or lists.
-- Always answer in exactly one short sentence.
-- Match this style exactly: 'The sum is 25.' or 'The answer is 42.'"""
-},
-},
+                    "role": "system",
+                    "content": """You answer questions in exactly one short sentence ending with a period.
+For math questions always use this exact style:
+- Addition: 'The sum is X.'
+- Subtraction: 'The difference is X.'
+- Multiplication: 'The product is X.'
+- Division: 'The quotient is X.'
+- Factorial: 'The factorial is X.'
+- Square root: 'The square root is X.'
+For all other questions, answer in one clean sentence ending with a period.
+Never add any extra words, explanation, or formatting."""
+                },
                 {
-                    {
-    "role": "user",
-    "content": f"Answer in one sentence: {request.query}"
-},
+                    "role": "user",
+                    "content": request.query
                 }
             ],
             temperature=0,
-            max_tokens=500
+            max_tokens=100
         )
 
         content = response.choices[0].message.content or "Could not process accurately"
