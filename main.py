@@ -1,63 +1,78 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 import re
+import math
+import logging
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from groq import AsyncGroq
 
-app = FastAPI()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="AI Agent API", version="1.0.0")
+
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 class SolveRequest(BaseModel):
-    query: str
-    assets: Optional[List[str]] = []
+    query: str = Field(..., description="The question to answer")
+    assets: Optional[List[str]] = Field(default=[], description="Asset URLs")
 
 class SolveResponse(BaseModel):
     output: str
 
-@app.post("/solve")
+@app.get("/")
+async def health_check():
+    return {"status": "ok"}
+
+@app.post("/solve", response_model=SolveResponse)
 async def solve_problem(request: SolveRequest):
     try:
-        q = request.query.strip()
-        
-        # Determine if it's a Yes/No question
-        is_bool = re.match(r'^(Is|Are|Was|Were|Do|Does|Did|Can|Could|Will|Would|Has|Have|Had)', q, re.I)
-
         response = await client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "You are a raw data extractor. Output ONLY the value. NO words, NO punctuation, NO sentences. If Yes/No, output YES or NO. If numbers, output ONLY the digits."},
-                {"role": "user", "content": q}
+                {
+                    "role": "system",
+                    "content": """You are a precise question answering assistant. Follow these rules STRICTLY:
+
+1. YES/NO QUESTIONS (starts with Is, Are, Was, Were, Do, Does, Did, Can, Could, Will, Would, Has, Have, Had):
+   → Reply ONLY 'YES' or 'NO' in capitals.
+   Example: 'Is 9 an odd number?' → 'YES'
+
+2. EXTRACTION QUESTIONS (extract, find, get, identify):
+   → Return ONLY the extracted value. No extra words.
+   Example: 'Extract date from: Meeting on 12 March 2024' → '12 March 2024'
+
+3. NUMBER/MATH OPERATIONS ON A LIST (sum, average, count, max, min, filter):
+   → Return ONLY the final number. Nothing else.
+   Example: 'Numbers: 2,5,8,11. Sum even numbers.' → '10'
+   Example: 'Numbers: 1,2,3,4,5. Count odd numbers.' → '3'
+
+4. MATH QUESTIONS (two numbers with operation):
+   → Return in format 'The sum/difference/product/quotient is X.'
+   Example: 'What is 10 + 15?' → 'The sum is 25.'
+
+5. FACTUAL QUESTIONS:
+   → Answer in one short sentence ending with a period.
+   Example: 'What is the capital of France?' → 'The capital of France is Paris.'
+
+NEVER add explanations or extra text. Return ONLY what the format requires."""
+                },
+                {
+                    "role": "user",
+                    "content": request.query
+                }
             ],
             temperature=0,
-            max_tokens=10,
-            stop=["\n", "."]
+            max_tokens=50
         )
 
-        raw = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content or "Could not process accurately"
+        return SolveResponse(output=content.strip())
 
-        # --- THE 100% ACCURACY FILTER ---
-        
-        # 1. Force Boolean
-        if is_bool:
-            # Platform wants exact 'YES' or 'NO'
-            return SolveResponse(output="YES" if "YES" in raw.upper() or "TRUE" in raw.upper() else "NO")
-
-        # 2. Force Math/Numbers (Crucial for Level 4)
-        # If the input looks like a math problem, extract ONLY the digits/decimal
-        if any(word in q.lower() for word in ["sum", "total", "count", "add", "number"]):
-            # This regex pulls out numbers even if the AI says "The answer is 10"
-            numbers = re.findall(r"[-+]?\d*\.\d+|\d+", raw)
-            if numbers:
-                # Returns the last number found (the result) as a clean string
-                return SolveResponse(output=str(numbers[-1]))
-
-        # 3. Force Clean Extraction
-        # Remove "Answer:", "Result:", etc. and strip trailing punctuation
-        clean = re.sub(r'^(.*?):\s*', '', raw) # Removes "Anything: "
-        clean = clean.rstrip(".!?,")
-        
-        return SolveResponse(output=clean)
-
-    except:
-        return SolveResponse(output="YES")
+    except Exception as e:
+        logger.error(f"Error: {type(e).__name__}: {e}")
+        return SolveResponse(output="Could not process accurately")
