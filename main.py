@@ -24,6 +24,10 @@ class SolveRequest(BaseModel):
 class SolveResponse(BaseModel):
     output: str
 
+def is_yes_no_question(query: str) -> bool:
+    q = query.lower().strip()
+    return q.startswith(("is ", "are ", "was ", "were ", "do ", "does ", "did ", "can ", "could ", "will ", "would ", "has ", "have ", "had "))
+
 @app.get("/")
 async def health_check():
     return {"status": "ok"}
@@ -39,14 +43,16 @@ async def solve_problem(request: SolveRequest):
                     "content": """You are a precise information extraction and question answering assistant.
 
 Rules:
+- If the question is a YES/NO question (starts with Is, Are, Was, Were, Do, Does, Did, Can, Could, Will, Would, Has, Have, Had), reply with ONLY 'YES' or 'NO' in capitals.
 - If asked to extract something (date, name, number, etc.), return ONLY the extracted value. Nothing else.
-- If asked a math question, return ONLY the answer in format like 'The sum is 25.'
+- If asked a math question, return ONLY in format like 'The sum is 25.'
 - If asked a factual question, answer in one short sentence ending with a period.
-- NEVER add extra words, explanation, or punctuation beyond what is needed.
+- NEVER add extra words or explanation.
 
 Examples:
+- 'Is 9 an odd number?' → 'YES'
+- 'Is Paris the capital of Germany?' → 'NO'
 - 'Extract date from: Meeting on 12 March 2024' → '12 March 2024'
-- 'Extract name from: Email from John Smith' → 'John Smith'
 - 'What is 10 + 15?' → 'The sum is 25.'
 - 'What is the capital of France?' → 'The capital of France is Paris.'"""
                 },
